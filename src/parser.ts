@@ -49,12 +49,12 @@ export function parseQuery(query: string): ParsedQuery {
   // Check for aggregations
   const aggregations = parseAggregations(fieldsStr);
 
-  // Extract FROM selector
-  const fromMatch = query.match(/FROM\s+([^\s]+)/i);
+  // Extract FROM selector (supports quoted selectors for spaces)
+  const fromMatch = query.match(/FROM\s+"([^"]+)"|FROM\s+\[([^\]]+)\]|FROM\s+([^\s]+)/i);
   if (!fromMatch) {
     throw new Error('Invalid query: missing FROM clause');
   }
-  const selector = fromMatch[1];
+  const selector = fromMatch[1] || fromMatch[2] || fromMatch[3];
 
   // Extract WHERE clause (optional)
   const whereMatch = query.match(/WHERE\s+(.+?)(?:\s+ORDER BY|\s+LIMIT|$)/i);
@@ -174,33 +174,55 @@ function parseWhere(whereStr: string): WhereClause | undefined {
 }
 
 function parseWhereCondition(condition: string): WhereClause | null {
-  // Match: field operator value
-  const patterns = [
-    /(\w+)\s*(=|!=|>|<|>=|<=)\s*(.+)/,
-    /(\w+)\s+LIKE\s+'([^']+)'/i,
-    /(\w+)\s+NOT\s+LIKE\s+'([^']+)'/i,
-    /(\w+)\s+IN\s+\(([^)]+)\)/i
-  ];
+  // Normalize field name: strip @ prefix, allow hyphens
+  const normalizeField = (f: string) => f.replace(/^@/, '');
 
-  for (const pattern of patterns) {
-    const match = condition.match(pattern);
-    if (match) {
-      const field = match[1];
-      const operator = match[2] || (condition.includes('NOT') ? 'NOT LIKE' : 'LIKE');
-      let value: any = match[3] || match[2];
+  // Handle IN operator separately to return array
+  const inMatch = condition.match(/@?([\w-]+)\s+IN\s+\(([^)]+)\)/i);
+  if (inMatch) {
+    const values = inMatch[2].split(',').map(v => {
+      let val = v.trim().replace(/^['"]|['"]$/g, '');
+      if (/^\d+$/.test(val)) return parseInt(val);
+      if (/^\d+\.\d+$/.test(val)) return parseFloat(val);
+      return val;
+    });
+    return { field: normalizeField(inMatch[1]), operator: 'IN', value: values };
+  }
 
-      // Clean up value
-      value = value.replace(/^['"]|['"]$/g, '').trim();
+  // Handle REGEXP/RLIKE operators
+  const notRegexpMatch = condition.match(/@?([\w-]+)\s+NOT\s+(?:REGEXP|RLIKE)\s+'([^']+)'/i);
+  if (notRegexpMatch) {
+    return { field: normalizeField(notRegexpMatch[1]), operator: 'NOT REGEXP', value: notRegexpMatch[2] };
+  }
 
-      // Try to coerce type
-      if (/^\d+$/.test(value)) {
-        value = parseInt(value);
-      } else if (/^\d+\.\d+$/.test(value)) {
-        value = parseFloat(value);
-      }
+  const regexpMatch = condition.match(/@?([\w-]+)\s+(?:REGEXP|RLIKE)\s+'([^']+)'/i);
+  if (regexpMatch) {
+    return { field: normalizeField(regexpMatch[1]), operator: 'REGEXP', value: regexpMatch[2] };
+  }
 
-      return { field, operator, value };
+  // Handle LIKE operators separately
+  const notLikeMatch = condition.match(/@?([\w-]+)\s+NOT\s+LIKE\s+'([^']+)'/i);
+  if (notLikeMatch) {
+    return { field: normalizeField(notLikeMatch[1]), operator: 'NOT LIKE', value: notLikeMatch[2] };
+  }
+
+  const likeMatch = condition.match(/@?([\w-]+)\s+LIKE\s+'([^']+)'/i);
+  if (likeMatch) {
+    return { field: normalizeField(likeMatch[1]), operator: 'LIKE', value: likeMatch[2] };
+  }
+
+  // Match: field operator value (comparisons)
+  const compMatch = condition.match(/@?([\w-]+)\s*(=|!=|>=|<=|>|<)\s*(.+)/);
+  if (compMatch) {
+    let value: any = compMatch[3].replace(/^['"]|['"]$/g, '').trim();
+
+    if (/^\d+$/.test(value)) {
+      value = parseInt(value);
+    } else if (/^\d+\.\d+$/.test(value)) {
+      value = parseFloat(value);
     }
+
+    return { field: normalizeField(compMatch[1]), operator: compMatch[2], value };
   }
 
   return null;

@@ -21,6 +21,10 @@ export function formatOutput(result: QueryResult, options: FormatOptions): strin
 }
 
 function formatTable(result: QueryResult, includeHeaders: boolean): string {
+  if (result.rows.length === 0) {
+    return includeHeaders ? `(no results for fields: ${result.fields.join(', ')})` : '(no results)';
+  }
+
   const table = new Table({
     head: includeHeaders ? result.fields : undefined,
     style: { head: ['cyan'] }
@@ -35,7 +39,7 @@ function formatTable(result: QueryResult, includeHeaders: boolean): string {
 
 function formatJson(result: QueryResult): string {
   const objects = result.rows.map(row => {
-    const obj: any = {};
+    const obj: Record<string, unknown> = {};
     result.fields.forEach((field, idx) => {
       obj[field] = row[idx];
     });
@@ -52,7 +56,7 @@ function formatCsv(result: QueryResult, includeHeaders: boolean): string {
   }
 
   result.rows.forEach(row => {
-    lines.push(row.map(v => escapeCsv(String(v))).join(','));
+    lines.push(row.map(v => escapeCsv(v == null ? '' : String(v))).join(','));
   });
 
   return lines.join('\n');
@@ -62,18 +66,18 @@ function formatJsonl(result: QueryResult): string {
   const lines: string[] = [];
   
   result.rows.forEach(row => {
-    const obj: any = {};
+    const obj: Record<string, unknown> = {};
     result.fields.forEach((field, idx) => {
       obj[field] = row[idx];
     });
     lines.push(JSON.stringify(obj));
   });
 
-  return lines.join('\n');
+  return lines.join('\n') + '\n';
 }
 
 function escapeCsv(value: string): string {
-  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+  if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;

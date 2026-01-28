@@ -137,12 +137,63 @@ function evaluateWhere(row: any[], fields: string[], where: WhereClause): boolea
     case '<=':
       result = value <= compareValue;
       break;
-    case 'LIKE':
-      result = String(value).includes(String(compareValue).replace(/%/g, ''));
+    case 'LIKE': {
+      const pattern = String(compareValue);
+      const str = String(value).toLowerCase();
+      const search = pattern.toLowerCase();
+
+      if (search.startsWith('%') && search.endsWith('%')) {
+        result = str.includes(search.slice(1, -1));
+      } else if (search.startsWith('%')) {
+        result = str.endsWith(search.slice(1));
+      } else if (search.endsWith('%')) {
+        result = str.startsWith(search.slice(0, -1));
+      } else {
+        result = str === search;
+      }
       break;
-    case 'NOT LIKE':
-      result = !String(value).includes(String(compareValue).replace(/%/g, ''));
+    }
+    case 'NOT LIKE': {
+      const pattern = String(compareValue);
+      const str = String(value).toLowerCase();
+      const search = pattern.toLowerCase();
+
+      if (search.startsWith('%') && search.endsWith('%')) {
+        result = !str.includes(search.slice(1, -1));
+      } else if (search.startsWith('%')) {
+        result = !str.endsWith(search.slice(1));
+      } else if (search.endsWith('%')) {
+        result = !str.startsWith(search.slice(0, -1));
+      } else {
+        result = str !== search;
+      }
       break;
+    }
+    case 'IN': {
+      const inValues = Array.isArray(compareValue)
+        ? compareValue
+        : String(compareValue).split(',').map(v => coerceValue(v.trim()));
+      result = inValues.some(v => v === value);
+      break;
+    }
+    case 'REGEXP': {
+      try {
+        const regex = parseRegex(String(compareValue));
+        result = regex.test(String(value));
+      } catch {
+        result = false;
+      }
+      break;
+    }
+    case 'NOT REGEXP': {
+      try {
+        const regex = parseRegex(String(compareValue));
+        result = !regex.test(String(value));
+      } catch {
+        result = false;
+      }
+      break;
+    }
   }
 
   if (where.next) {
@@ -157,6 +208,22 @@ function evaluateWhere(row: any[], fields: string[], where: WhereClause): boolea
   return result;
 }
 
+function parseRegex(pattern: string): RegExp {
+  // Support /pattern/flags syntax
+  const slashMatch = pattern.match(/^\/(.+)\/([gimsuy]*)$/);
+  if (slashMatch) {
+    return new RegExp(slashMatch[1], slashMatch[2]);
+  }
+
+  // Support (?flags) prefix (convert to JS flags)
+  const flagMatch = pattern.match(/^\(\?([gimsuy]+)\)(.+)$/);
+  if (flagMatch) {
+    return new RegExp(flagMatch[2], flagMatch[1]);
+  }
+
+  return new RegExp(pattern);
+}
+
 function coerceValue(value: any): any {
   if (typeof value === 'string') {
     // Try number
@@ -166,10 +233,12 @@ function coerceValue(value: any): any {
     if (/^\d+\.\d+$/.test(value)) {
       return parseFloat(value);
     }
-    // Try date
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) {
-      return date;
+    // Only parse ISO-ish date formats to avoid false positives
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
     }
   }
   return value;
@@ -191,16 +260,16 @@ function executeAggregations(rows: any[][], fields: string[], query: ParsedQuery
         
         switch (agg.function) {
           case 'AVG':
-            results.push(values.reduce((a, b) => a + b, 0) / values.length);
+            results.push(values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null);
             break;
           case 'MIN':
-            results.push(Math.min(...values));
+            results.push(values.length > 0 ? values.reduce((a, b) => Math.min(a, b)) : null);
             break;
           case 'MAX':
-            results.push(Math.max(...values));
+            results.push(values.length > 0 ? values.reduce((a, b) => Math.max(a, b)) : null);
             break;
           case 'SUM':
-            results.push(values.reduce((a, b) => a + b, 0));
+            results.push(values.length > 0 ? values.reduce((a, b) => a + b, 0) : null);
             break;
         }
       } else {
