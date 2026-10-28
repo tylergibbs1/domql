@@ -1,12 +1,21 @@
 # domql
 
-SQL syntax for DOM querying - Query web pages like databases.
+Query web pages with SQL. domql loads a page in headless Chromium (via Playwright), selects elements with CSS selectors, and returns rows you can filter, sort, aggregate, and export as a table, JSON, CSV, or JSONL.
+
+```bash
+domql https://news.ycombinator.com "SELECT text, @href FROM .titleline>a LIMIT 10"
+```
 
 ## Installation
 
+Requires [Bun](https://bun.sh).
+
 ```bash
+git clone https://github.com/tylergibbs1/domql.git
+cd domql
 bun install
-bun link
+bunx playwright install chromium   # browser used for page loading
+bun link                           # makes `domql` available globally
 ```
 
 ## Usage
@@ -32,7 +41,7 @@ domql https://example.com "SELECT text FROM h2" -f json
 domql https://example.com "SELECT text FROM h2" -f csv -o output.csv
 ```
 
-## Query Syntax
+## Query syntax
 
 ### SELECT clause
 - `text` - Element text content
@@ -122,8 +131,8 @@ SELECT text FROM .item LIMIT 10
 | `-f, --format <type>` | Output format: table, json, csv, jsonl (default: table) |
 | `-o, --output <file>` | Write output to file |
 | `--no-headers` | Omit headers in CSV/table output |
-| `--js` / `--no-js` | Enable/disable JavaScript rendering (default: enabled) |
-| `--wait <ms>` | Wait time after page load |
+| `--js` / `--no-js` | Enable/disable JavaScript rendering (default: enabled; `--no-js` is faster for static pages) |
+| `--wait <ms>` | Wait time after page load (default: 0) |
 | `--timeout <ms>` | Page load timeout (default: 30000) |
 | `--verbose` | Verbose logging |
 
